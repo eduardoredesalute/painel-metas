@@ -445,7 +445,11 @@ const OKRS=[
    raw:w=>w.passes!=null?fmt(w.passes,"int")+" passes":null}]},
  {id:"exames",nome:"Exames",titulo:"Exames",desc:"Faturamento de exames em R$ por dia útil.",inds:[
   {id:"labus",nome:"Lab + US",agg:"sum",sub:"R$ por dia útil",fmt:"brl",metaKind:"dec",
-   inputs:[{key:"labus",label:"R$ por DU",kind:"dec"}], metric:w=>w.labus??null, target:m=>m},
+   inputs:[{key:"lab",label:"Laboratório (R$ por DU)",kind:"dec"},{key:"us",label:"US (R$ por DU)",kind:"dec"}],
+   calcNote:"Lab + US é a soma dos dois, calculada pelo painel.",
+   // lançamentos novos têm lab e us separados; os antigos só o total (labus)
+   metric:w=>(w.lab!=null||w.us!=null)?(w.lab||0)+(w.us||0):(w.labus??null), target:m=>m,
+   tip:w=>(w.lab!=null||w.us!=null)?"Laboratório: R$ "+nf(0).format(w.lab||0)+"\nUS: R$ "+nf(0).format(w.us||0):null},
   {id:"todos",nome:"Todos os exames",agg:"sum",sub:"R$ por dia útil",fmt:"brl",metaKind:"dec",
    inputs:[{key:"todos",label:"R$ por DU",kind:"dec"}], metric:w=>w.todos??null, target:m=>m}]},
  {id:"digital",nome:"Digitalização",titulo:"Digitalização",desc:"Atendimento digitalizado no consultório e uso do totem.",inds:[
@@ -564,7 +568,7 @@ function tgt(mes,u,ind,col){const t=targetOf(mes,u,ind);if(t==null||!ind.prorate
 function cell(mes,u,ind,col){
   const r=S.res[mes+"_"+u]||{}, w=r[col.key]||{}, c=ctx(mes,u);
   const v=ind.metric(w,col.du,c);
-  return {v:(v==null||!isFinite(v))?null:v, raw:ind.raw?ind.raw(w,c):null};
+  return {v:(v==null||!isFinite(v))?null:v, raw:ind.raw?ind.raw(w,c):null, tip:ind.tip?ind.tip(w):null};
 }
 function status(ind,v,t){if(v==null||t==null)return "na";return (ind.lower?v<=t+1e-12:v>=t-1e-12)?"ok":"bad";}
 function acumulado(mes,u,ind){
@@ -638,6 +642,7 @@ function resCell(ind,x,t,cls){
   const td=h("td",{class:cls||null});
   if(ind.id==="passes"&&x.raw){td.append(h("span",{class:"v top "+status(ind,x.v,t)},x.raw.replace(" passes","")));td.append(vSpan(ind,x.v,t));}
   else{td.append(vSpan(ind,x.v,t));if(x.raw)td.append(h("small",{class:"raw"},x.raw));}
+  if(x.tip){td.setAttribute("data-tip",x.tip);td.classList.add("has-tip");}
   return td;
 }
 // soma da rede: "sum" soma valores e metas; "ratio" (passes) = Σpasses / Σvendas
@@ -798,6 +803,7 @@ function openModal(mes,colKey){
   const form=h("form",{class:"dlg",role:"dialog","aria-modal":"true","aria-labelledby":"dlg-t",onsubmit:async e=>{
     e.preventDefault();
     const {w,m,bad}=read();
+    if("lab" in w||"us" in w)w.labus=(w.lab==null&&w.us==null)?null:(w.lab||0)+(w.us||0); // guarda também o total
     if(bad){msg.className="msg err-t";msg.textContent="Corrija os campos em vermelho. Use só números, como 1.250 ou 88,5.";return;}
     const u=S.unit,id=mes+"_"+u;
     const patch={[c.key]:w,mes:m,atualizadoEm:new Date().toISOString()};
