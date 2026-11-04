@@ -193,8 +193,219 @@ html{-webkit-text-size-adjust:100%}body{margin:0}[hidden]{display:none!important
 .who-me .sair{margin-left:6px;background:none;border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:6px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-<script src="js/config.js"></script>
-<script src="js/backend.js"></script>
+<script>
+// Dados do projeto Supabase "REDE SALUTE" (Project URL e chave publishable — ambas são públicas por natureza)
+window.PAINEL_CONFIG = {
+  supabaseUrl: "https://zdqqqxguytiobfscozrj.supabase.co",
+  supabaseAnonKey: "sb_publishable_OaZlNm2xj5UOwDnCpfNanA_nSnAvsQg"
+};
+</script>
+<script>
+/*
+  Ponte entre o painel e o Supabase.
+  O painel foi escrito para o banco do claude.ai (window.claude.use("db") e use("user")).
+  Este arquivo oferece a mesma interface usando uma tabela "docs" no Supabase,
+  com login por e-mail (link mágico) e atualização em tempo real.
+  Também mistura os dados diários do Google (data/google.json) nos resultados.
+*/
+(function () {
+  "use strict";
+  const CFG = window.PAINEL_CONFIG || {};
+  if (!window.supabase || !CFG.supabaseUrl || !CFG.supabaseAnonKey) {
+    console.error("Configure js/config.js com a URL e a chave anon do Supabase.");
+    return;
+  }
+  const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+
+  /* ---------- estado ---------- */
+  const store = new Map();          // "colecao/id" -> data
+  const listeners = new Set();      // funções chamadas a cada mudança
+  let usuarios = [];                // [{email, nome, admin}]
+  let me = null;                    // {email, nome, admin}
+  let google = null;                // conteúdo de data/google.json
+  let resolveReady; const ready = new Promise(r => (resolveReady = r));
+
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const isObj = v => v && typeof v === "object" && !Array.isArray(v);
+  function deepMerge(base, patch) {
+    const out = isObj(base) ? clone(base) : {};
+    for (const k in patch) out[k] = isObj(patch[k]) && isObj(out[k]) ? deepMerge(out[k], patch[k]) : patch[k];
+    return out;
+  }
+  const notify = () => listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } });
+
+  /* ---------- Google: snapshots diários -> colunas do mês ---------- */
+  const pad = n => String(n).padStart(2, "0");
+  function hojeISO() { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function overlayGoogle(id, data) {
+    if (!google || !google.dias) return data;
+    const mes = id.slice(0, 7), u = id.slice(8);
+    const [y, m] = mes.split("-").map(Number);
+    const ultimo = new Date(y, m, 0).getDate(), hoje = hojeISO();
+    const dias = Object.keys(google.dias).filter(d => google.dias[d] && google.dias[d][u]).sort();
+    if (!dias.length) return data;
+    // último dado entre "de" e "lim" (datas AAAA-MM-DD), nunca no futuro
+    const ate = (lim, de) => { let r = null; for (const d of dias) if (d >= (de || mes + "-01") && d <= lim && d <= hoje) r = d; return r; };
+    const out = clone(data || {});
+    let semana = 0, inicioSemana = mes + "-01";
+    for (let dia = 1; dia <= ultimo; dia++) {
+      if (new Date(y, m - 1, dia).getDay() !== 2) continue;
+      semana++;
+      const d = ate(mes + "-" + pad(dia), inicioSemana); // só dias desta semana (quarta a terça)
+      inicioSemana = mes + "-" + pad(dia + 1);
+      if (d) { const [nota, total] = google.dias[d][u]; out["w" + semana] = Object.assign({}, out["w" + semana], { google: total, googleNota: nota }); }
+    }
+    const fim = mes + "-" + pad(ultimo);
+    if (hoje > fim) { const d = ate(fim); if (d) { const [nota, total] = google.dias[d][u]; out.fech = Object.assign({}, out.fech, { google: total, googleNota: nota }); } }
+    // início do mês = último dado do mês anterior
+    let ini = null; for (const d of dias) if (d < mes + "-01") ini = d;
+    const ultimoDoMes = ate(fim);
+    out.mes = Object.assign({}, out.mes);
+    if (ini) out.mes.googleInicio = google.dias[ini][u][1];
+    if (ultimoDoMes) out.mes.googleNota = google.dias[ultimoDoMes][u][0];
+    return out;
+  }
+  function resultadosComGoogle() {
+    const docs = new Map();
+    for (const [k, v] of store) if (k.startsWith("resultados/")) docs.set(k.slice(11), v);
+    if (google && google.dias) {
+      // garante documento para meses/unidades que só têm dado do Google
+      for (const d of Object.keys(google.dias)) for (const u of Object.keys(google.dias[d])) {
+        const id = d.slice(0, 7) + "_" + u; if (!docs.has(id)) docs.set(id, {});
+      }
+    }
+    return [...docs].map(([id, v]) => ({ id, data: overlayGoogle(id, v) }));
+  }
+
+  /* ---------- leitura ---------- */
+  async function carregarTudo() {
+    let from = 0; const page = 1000;
+    for (;;) {
+      const { data, error } = await sb.from("docs").select("collection,id,data").range(from, from + page - 1);
+      if (error) throw error;
+      data.forEach(r => store.set(r.collection + "/" + r.id, r.data || {}));
+      if (data.length < page) break; from += page;
+    }
+    if (me && me.admin) { const u = await sb.from("usuarios").select("email,nome,admin"); usuarios = u.data || []; }
+    // Google: lançado pelos líderes (sem arquivo automático)
+  }
+  function escutarMudancas() {
+    sb.channel("docs-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "docs" }, p => {
+        const row = p.new && p.new.collection ? p.new : p.old;
+        if (!row || !row.collection) return;
+        const key = row.collection + "/" + row.id;
+        if (p.eventType === "DELETE") store.delete(key); else store.set(key, p.new.data || {});
+        notify();
+      })
+      .subscribe();
+
+  }
+
+  /* ---------- escrita ---------- */
+  function erro(e) {
+    const err = new Error(e && e.message ? e.message : "Falha ao salvar");
+    err.code = e && (e.code === "42501" || /row-level security|permission/i.test(e.message || "")) ? "invalid_argument" : "unavailable";
+    return err;
+  }
+  async function gravar(col, id, data) {
+    const row = { collection: col, id, data, updated_at: new Date().toISOString(), updated_by: me && me.email };
+    const { error } = await sb.from("docs").upsert(row, { onConflict: "collection,id" });
+    if (error) throw erro(error);
+    store.set(col + "/" + id, data); notify();
+  }
+  async function lerDoServidor(col, id) {
+    const { data, error } = await sb.from("docs").select("data").eq("collection", col).eq("id", id).maybeSingle();
+    if (error) throw erro(error);
+    return data ? data.data : null;
+  }
+
+  /* ---------- interface igual à do claude.ai ---------- */
+  function snapDoc(col, id) {
+    const v = col === "resultados" ? (resultadosComGoogle().find(d => d.id === id) || {}).data : store.get(col + "/" + id);
+    return { id, exists: v !== undefined && v !== null, data: () => (v ? clone(v) : undefined) };
+  }
+  function docRef(col, id) {
+    return {
+      id,
+      onSnapshot(cb) { const f = () => cb(snapDoc(col, id)); listeners.add(f); setTimeout(f, 0); return () => listeners.delete(f); },
+      async get() { const v = await lerDoServidor(col, id); return { id, exists: !!v, data: () => (v ? clone(v) : undefined) }; },
+      async set(data) { await gravar(col, id, clone(data)); },
+      async update(patch) { const atual = (await lerDoServidor(col, id)) || {}; await gravar(col, id, deepMerge(atual, patch)); }
+    };
+  }
+  const db = {
+    collection(col) {
+      return {
+        doc: id => docRef(col, id),
+        onSnapshot(cb) {
+          const f = () => {
+            const docs = col === "resultados" ? resultadosComGoogle()
+              : [...store].filter(([k]) => k.startsWith(col + "/")).map(([k, v]) => ({ id: k.slice(col.length + 1), data: v }));
+            cb({ docs: docs.map(d => ({ id: d.id, exists: true, data: () => clone(d.data) })), size: docs.length, empty: !docs.length });
+          };
+          listeners.add(f); setTimeout(f, 0); return () => listeners.delete(f);
+        }
+      };
+    },
+    doc(path) { const [col, id] = path.split("/"); return docRef(col, id); }
+  };
+  const user = {
+    async id() { return me.admin ? me.email : null; },
+    async isOwner() { return !!me.admin; },
+    async can() { return true; },
+    async me() { return { id: me.email, name: me.nome || me.email, avatarUrl: "" }; },
+    async profiles(ids) { const o = {}; ids.forEach(i => { const u = usuarios.find(x => x.email.toLowerCase() === String(i).toLowerCase()); o[i] = { id: i, name: u ? (u.nome || u.email) : "" }; }); return o; }
+  };
+  window.claude = { use: async name => { await ready; return name === "db" ? db : name === "user" ? user : null; } };
+
+  /* ---------- acesso ----------
+     Líderes: abrem o link e lançam direto, sem login.
+     Administrador: entra pelo botão "Admin" do cabeçalho (link por e-mail) para alterar metas. */
+  function tela(html) {
+    let el = document.getElementById("login");
+    if (!el) { el = document.createElement("div"); el.id = "login"; document.body.append(el); }
+    el.innerHTML = '<div class="login-card">' + html + "</div>";
+    return el;
+  }
+  function loginAdmin() {
+    const el = tela(
+      '<h2>Entrar como administrador</h2><p>Para alterar metas, dias úteis e feriados. Você vai receber um link no e-mail.</p>' +
+      '<form id="login-form"><label for="login-email">E-mail</label><input id="login-email" type="email" required autocomplete="email">' +
+      '<button type="submit" class="btn yellow">Receber link de acesso</button></form><p class="login-msg" id="login-msg"></p>' +
+      '<button type="button" class="btn ghost" id="login-fechar">Voltar ao painel</button>');
+    el.querySelector("#login-fechar").onclick = () => el.remove();
+    el.querySelector("#login-form").addEventListener("submit", async e => {
+      e.preventDefault();
+      const out = el.querySelector("#login-msg"); out.textContent = "Enviando…";
+      const { error } = await sb.auth.signInWithOtp({ email: el.querySelector("#login-email").value.trim(), options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
+      out.textContent = error ? "Não foi possível enviar: " + error.message : "Pronto. Abra o e-mail e clique no link para voltar ao painel como administrador.";
+    });
+  }
+  function botaoCabecalho() {
+    const box = document.getElementById("userbox"); if (!box || document.getElementById("btn-sair")) return;
+    const b = document.createElement("button"); b.id = "btn-sair"; b.className = "sair"; b.type = "button";
+    if (me.admin) { b.textContent = "Sair"; b.onclick = async () => { await sb.auth.signOut(); location.reload(); }; }
+    else { b.textContent = "Admin"; b.title = "Entrar como administrador"; b.onclick = loginAdmin; }
+    box.append(b);
+  }
+  async function iniciar(session) {
+    me = { email: null, nome: "Liderança", admin: false };
+    if (session) {
+      const { data: u } = await sb.from("usuarios").select("email,nome,admin").ilike("email", session.user.email).maybeSingle();
+      if (u && u.admin) me = u;
+    }
+    try { await carregarTudo(); }
+    catch (e) { tela("<h2>Erro ao carregar</h2><p></p>").querySelector("p").textContent = e.message; return; }
+    escutarMudancas();
+    resolveReady();
+    setTimeout(botaoCabecalho, 300);
+  }
+  let iniciado = false;
+  sb.auth.getSession().then(({ data }) => { iniciado = true; iniciar(data.session); });
+  sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_IN" && iniciado && session && !(me && me.admin)) location.reload(); });
+})();
+</script>
 </head>
 <body>
 <header class="top">
@@ -721,7 +932,7 @@ function render(){
   if(S.view!=="painel"&&S.view!=="cfg")S.view="painel";
   document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected",String(t.dataset.v===S.view)));
   const fresh=h("main",{class:"wrap",id:"app"});
-  if(!db){fresh.append(h("div",{class:"empty"},"Este painel guarda os dados no claude.ai. Abra pelo link do claude.ai, conectado à sua conta, para ver e lançar resultados."));app.replaceWith(fresh);return;}
+  if(!db){fresh.append(h("div",{class:"empty"},"Não foi possível conectar ao banco de dados. Verifique a internet e recarregue a página."));app.replaceWith(fresh);return;}
   if(!(S.ready.meses&&S.ready.metas&&S.ready.res)){fresh.append(h("div",{class:"empty"},"Carregando metas e resultados…"));app.replaceWith(fresh);return;}
   const ids=monthIds();
   if(!S.mes||!ids.includes(S.mes))S.mes=ids.includes(thisMonth())?thisMonth():ids[0];
