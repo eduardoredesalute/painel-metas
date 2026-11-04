@@ -432,13 +432,13 @@ window.PAINEL_CONFIG = {
 const OKRS=[
  {id:"comercial",nome:"Comercial",titulo:"Comercial",desc:"Vendas no PDV por dia útil e conversão em passes.",inds:[
   {id:"pdvTotal",nome:"Total PDV",sub:"vendas acumuladas no mês · semanas comparadas com a meta proporcional aos dias úteis",fmt:"int",metaKey:"pdv",prorate:true,agg:"sum",short:"Total PDV",
-   inputs:[], metric:w=>w.pdv??null, target:m=>m},
+   inputs:[{key:"pdv",label:"Quantidade de vendas PDV",kind:"int"}], metric:w=>w.pdv??null, target:m=>m},
   {id:"pdv",nome:"Vendas x DU",short:"Vendas x DU",agg:"sum",sub:"vendas por dia útil",fmt:"dec2",metaKind:"int",
-   inputs:[{key:"pdv",label:"Vendas PDV acumuladas",kind:"int"}],
+   inputs:[], calc:"Calculado pelo painel: Total PDV ÷ dias úteis.",
    metric:(w,du)=>w.pdv!=null&&du?w.pdv/du:null, target:(m,c)=>m!=null&&c.duMes?m/c.duMes:null,
   },
   {id:"passes",nome:"% Passes",short:"% Passes",agg:"ratio",sub:"% das vendas PDV",fmt:"pct0",metaKind:"pct",
-   inputs:[{key:"passes",label:"Passes acumulados",kind:"int"}],
+   inputs:[{key:"passes",label:"Quantidade de passes",kind:"int"}], calcNote:"O % é calculado pelo painel: passes ÷ Total PDV.",
    metric:w=>w.passes!=null&&w.pdv?w.passes/w.pdv:null, target:m=>m,
    raw:w=>w.passes!=null?fmt(w.passes,"int")+" passes":null}]},
  {id:"exames",nome:"Exames",titulo:"Exames",desc:"Faturamento de exames em R$ por dia útil.",inds:[
@@ -737,6 +737,7 @@ function openModal(mes,colKey){
     body.append(h("div",{class:"grp-h"},o.nome));
     o.inds.forEach(ind=>{
       const fins=h("div",{class:"fins"});
+      if(ind.calc||ind.calcNote)fins.append(h("span",{style:"font-size:12.5px;color:var(--muted);flex-basis:100%;order:2"},ind.calc||ind.calcNote));
       if(ind.auto)fins.append(h("span",{style:"font-size:12.5px;color:var(--muted)"},"Preenchido automaticamente todo dia com os dados do Google."));
       (ind.month||[]).concat(ind.inputs).forEach(f=>{
         const grp=(ind.month||[]).includes(f)?"mes":c.key;
