@@ -452,7 +452,7 @@ const OKRS=[
    tip:w=>(w.lab!=null||w.us!=null)?"Laboratório: R$ "+nf(0).format(w.lab||0)+"\nUS: R$ "+nf(0).format(w.us||0):null},
   {id:"todos",nome:"Todos os exames",agg:"sum",sub:"R$ por dia útil",fmt:"brl",metaKind:"dec",
    inputs:[{key:"todos",label:"R$ por DU",kind:"dec"}], metric:w=>w.todos??null, target:m=>m}]},
- {id:"digital",nome:"Digitalização",titulo:"Digitalização",desc:"Atendimento digitalizado no consultório e uso do totem.",inds:[
+ {id:"digital",nome:"Digitalização",split:true,titulo:"Digitalização",desc:"Atendimento digitalizado no consultório e uso do totem.",inds:[
   {id:"consultorio",nome:"Consultório",sub:"% digitalizado",fmt:"pct1",metaKind:"pct",
    inputs:[{key:"consultorio",label:"% digitalizado",kind:"pct"}], metric:w=>w.consultorio??null, target:m=>m},
   {id:"totem",nome:"Totem",sub:"% de uso do totem",fmt:"pct1",metaKind:"pct",
