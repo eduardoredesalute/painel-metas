@@ -113,6 +113,8 @@ table.q td.res{background:var(--panel-2)}
 table.q tr.sub th.res{background:var(--panel-2)}
 .has-tip{cursor:help}
 .tipbox{position:fixed;z-index:40;background:var(--navy);color:#fff;border-left:3px solid var(--yellow);border-radius:8px;padding:7px 11px;font-size:12.5px;line-height:1.5;white-space:pre;pointer-events:none;box-shadow:0 6px 18px rgba(0,0,0,.2)}
+table.q td.editavel{cursor:pointer}
+table.q td.editavel:hover{outline:2px solid var(--yellow);outline-offset:-2px}
 table.q .vermeta{display:block;margin:3px auto 0;border:0;background:none;padding:0 2px;font:inherit;font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 table.q .vermeta:hover{color:var(--title)}
 table.q .v.top{display:block;width:fit-content;margin:0 auto 3px}
@@ -680,17 +682,17 @@ function renderPainel(app){
           const tr=h("tr",{class:(k===0?"ufirst ":"")+(cls||"")});
           if(k===0)tr.append(h("td",{class:"c-u",rowspan:inds.length},label));
           if(!one)tr.append(h("td",{class:"c-k"},ind.short||ind.nome));
-          past.forEach(m=>{const r=getters.past(m,ind);if(isOpen(m))tr.append(metaTd("metac mstart",r.t==null?"—":fmt(r.t,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(m):null));tr.append(resCell(ind,r,r.t,"res"+(isOpen(m)?"":" mstart")));});
+          past.forEach(m=>{const r=getters.past(m,ind);if(isOpen(m))tr.append(metaTd("metac mstart",r.t==null?"—":fmt(r.t,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(m):null));tr.append(ed(resCell(ind,r,r.t,"res"+(isOpen(m)?"":" mstart")),getters,m,"fech"));});
           const mt=getters.meta(ind);
           tr.append(metaTd("metac cur-start",mt==null?"—":fmt(mt,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(mes):null));
-          weekCols.forEach(c=>{const r=getters.week(c,ind);const td=resCell(ind,r,r.t);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
-          const r=getters.acc(ind);const td=resCell(ind,r,r.t,"acc");if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);
+          weekCols.forEach(c=>{const r=getters.week(c,ind);const td=ed(resCell(ind,r,r.t),getters,mes,c.key);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
+          const r=getters.acc(ind);const td=ed(resCell(ind,r,r.t,"acc"),getters,mes,"fech");if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);
           if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}
           body.append(tr);
         });
       };
       S.units.forEach(u=>rowsFor(u.nome,{
-        tip:m=>labTip(m,[u.id]),
+        tip:m=>labTip(m,[u.id]), uid:u.id,
         past:(m,ind)=>{const a=acumulado(m,u.id,ind);return Object.assign({},a,{t:tgt(m,u.id,ind,a.col)});},
         meta:ind=>targetOf(mes,u.id,ind),
         week:(c,ind)=>Object.assign(cell(mes,u.id,ind,c),{t:tgt(mes,u.id,ind,c)}),
@@ -723,6 +725,14 @@ const queues={};
 function enqueue(id,fn){const p=(queues[id]||Promise.resolve()).then(fn,fn);queues[id]=p.catch(()=>{});return p;}
 let lastFocus=null;
 function closeModal(){const m=document.getElementById("modal");m.hidden=true;m.replaceChildren();document.body.classList.remove("locked");if(lastFocus&&lastFocus.focus)lastFocus.focus();if(S.pending)render();}
+// administrador: clicar num resultado abre a edição daquela unidade, mês e semana/fechamento
+function ed(td,getters,m,col){
+  if(!S.owner||!getters.uid||!canInsert())return td;
+  td.classList.add("editavel");td.tabIndex=0;td.title="Clique para editar";
+  const go=()=>{S.unit=getters.uid;openModal(m,col);};
+  td.addEventListener("click",go);td.addEventListener("keydown",e=>{if(e.key==="Enter")go();});
+  return td;
+}
 function openModal(mes,colKey){
   lastFocus=document.activeElement;
   const c=cols(mes).find(x=>x.key===colKey);
