@@ -482,7 +482,8 @@ function fmt(v,k){
     case "dec1":return nf(1).format(v);
     case "dec2":return nf(1).format(v); // divisões: 1 casa decimal
     case "brl":return "R$ "+nf(0).format(v);
-    case "pct":case "pct0":case "pct1":case "pct2":return nf(1).format(v*100)+"%"; // percentuais: 1 casa decimal
+    case "pct":case "pct0":case "pct1":return nf(1).format(v*100)+"%"; // percentuais: 1 casa decimal
+    case "pct2":return nf(2).format(v*100)+"%"; // índice de reclamações: 2 casas
   }
   return String(v);
 }
