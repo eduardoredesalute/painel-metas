@@ -486,13 +486,16 @@ const OKRS=[
    raw:(w,c)=>{const p=[];if(w.google!=null&&c.inicio!=null)p.push("+"+fmt(w.google-c.inicio,"int")+" no mês");if(w.googleNota!=null)p.push("nota "+nf(1).format(w.googleNota));return p.length?p.join(" · "):null;}},
   {id:"reclam",nome:"Índice de reclamações",sub:"quanto menor, melhor",fmt:"pct2",metaKind:"pct",lower:true,
    inputs:[{key:"reclam",label:"% reclamações",kind:"pct"}], metric:w=>w.reclam??null, target:m=>m},
-  {id:"faltas",nome:"Cobrança de faltas",sub:"% das faltas cobradas",fmt:"pct0",metaKind:"pct",
+  // Cobrança de faltas: guardado e oculto por enquanto. Para voltar a exibir, troque oculto:true por oculto:false.
+  {id:"faltas",oculto:true,nome:"Cobrança de faltas",sub:"% das faltas cobradas",fmt:"pct0",metaKind:"pct",
    inputs:[{key:"faltas",label:"Faltas acumuladas",kind:"int"},{key:"cobradas",label:"Faltas cobradas",kind:"int"}],
    metric:w=>w.faltas?(w.cobradas??0)/w.faltas:null, target:m=>m,
    raw:w=>w.faltas?fmt(w.cobradas??0,"int")+" de "+fmt(w.faltas,"int"):null}]}
 ];
 const MENSAIS=["pdv","passes","labus","todos"];          // meta muda a cada mês
 const FIXAS=["consultorio","totem","google","reclam","faltas"]; // meta fixa por unidade
+// indicadores marcados como oculto ficam guardados no código e no banco, mas não aparecem no painel
+OKRS.forEach(o=>{o.inds=o.inds.filter(i=>!i.oculto);});
 const INDS=OKRS.flatMap(o=>o.inds.map(i=>Object.assign(i,{okr:o,fixa:FIXAS.includes(i.id)})));
 const UNITS_DEFAULT=[["ALVORADA","Alvorada"],["ASSIS-BRASIL","Assis Brasil"],["CACHOEIRINHA","Cachoeirinha"],["CANOAS","Canoas"],["CAVALHADA","Cavalhada"],["CENTRO","Centro"],["GRAVATAI","Gravataí"],["RESTINGA","Restinga"],["VIAMAO","Viamão"]].map(([id,nome])=>({id,nome}));
 const FERIADOS_PADRAO=["2026-01-01","2026-02-02","2026-02-16","2026-02-17","2026-04-03","2026-04-21","2026-05-01","2026-06-04","2026-09-07","2026-09-20","2026-10-12","2026-11-02","2026-11-20","2026-12-08","2026-12-25"];
@@ -1014,7 +1017,7 @@ function openHelp(){
           h("div",{class:"hp-grp"},"Digitalização"),
           campos([["Consultório","% digitalizado (ex.: 88,5)"],["Totem","% de uso do totem (ex.: 72)"]]),
           h("div",{class:"hp-grp"},"Qualidade"),
-          campos([["Avaliações Google","Total de avaliações que aparece hoje no Google e a nota"],["Índice de reclamações","% de reclamações (ex.: 0,35)"],["Cobrança de faltas","Faltas no período e quantas foram cobradas"]])),
+          campos([["Avaliações Google","Total de avaliações que aparece hoje no Google e a nota"],["Índice de reclamações","% de reclamações (ex.: 0,35)"]].concat(INDS.some(i=>i.id==="faltas")?[["Cobrança de faltas","Faltas no período e quantas foram cobradas"]]:[]))),
         passo(5,"Confira e salve",p("Ao lado de cada campo aparece o resultado calculado: verde está na meta, vermelho está fora. Confira e clique em Salvar dados.")),
         passo(6,"Errou algum número?",p("Enquanto a semana estiver aberta, clique de novo em Inserir dados, escolha a unidade, corrija e salve. Depois que a semana fechar, peça a correção ao administrador."))),
       h("div",{class:"hp-tips"},h("b",{},"Dicas"),
