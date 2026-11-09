@@ -588,8 +588,14 @@ function metaRaw(mes,u,ind){
 }
 function targetOf(mes,u,ind){return ind.target(metaRaw(mes,u,ind),ctx(mes,u));}
 // meta da coluna: para totais, proporcional aos dias úteis até a semana
-function tgt(mes,u,ind,col){const t=targetOf(mes,u,ind);if(t==null||!ind.prorate||!col||col.key==="fech")return t;const d=duMes(mes);return d?t*col.du/d:t;}
+// Exceções pontuais de calendário por OKR (só afetam o OKR indicado; o resto do painel segue o calendário normal)
+const EXCECOES={
+  "2026-11|comercial|w1":{ate:new Date(2026,10,8),du:4} // 1ª semana de nov/26 no Comercial: dados até 08/11, 4 dias úteis
+};
+function excecao(mes,okrId,col){const e=col&&EXCECOES[mes+"|"+okrId+"|"+col.key];return e?Object.assign({},col,{ate:e.ate,du:e.du,sub:"até "+dm(e.ate),excecao:true}):col;}
+function tgt(mes,u,ind,col){col=excecao(mes,ind.okr.id,col);const t=targetOf(mes,u,ind);if(t==null||!ind.prorate||!col||col.key==="fech")return t;const d=duMes(mes);return d?t*col.du/d:t;}
 function cell(mes,u,ind,col){
+  col=excecao(mes,ind.okr.id,col);
   const r=S.res[mes+"_"+u]||{}, w=r[col.key]||{}, c=ctx(mes,u);
   const v=ind.metric(w,col.du,c);
   return {v:(v==null||!isFinite(v))?null:v, raw:ind.raw?ind.raw(w,c):null, tip:ind.tip?ind.tip(w):null};
@@ -703,7 +709,7 @@ function renderPainel(app){
         hr.append(h("th",{class:"res"+(isOpen(m)?"":" mstart")},"Resultado",b));
       });
       hr.append(h("th",{class:"cur-start"},"Meta"));
-      weekCols.forEach(c=>hr.append(h("th",{},c.label,h("small",{},c.sub+" · "+c.du+" DU"))));
+      weekCols.forEach(c=>{const x=excecao(mes,inds[0].okr.id,c);hr.append(h("th",{},c.label,h("small",{},x.sub+" · "+x.du+" DU")));});
       hr.append(h("th",{class:"acc"},"Acumulado",h("small",{},"mês")));
       const body=h("tbody");
       const rowsFor=(label,getters,first,cls)=>{
@@ -776,6 +782,7 @@ function openModal(mes,colKey){
   const fields=[]; // {el, grp, key, kind}
   OKRS.forEach(o=>{
     body.append(h("div",{class:"grp-h"},o.nome));
+    {const x=excecao(mes,o.id,c);if(x.excecao)body.append(h("div",{class:"note",style:"margin-top:6px"},"Nesta semana, o "+o.nome+" considera os dados até "+dmw(x.ate)+" ("+x.du+" dias úteis)."));}
     o.inds.forEach(ind=>{
       const fins=h("div",{class:"fins"});
       if(ind.calc||ind.calcNote)fins.append(h("span",{style:"font-size:12.5px;color:var(--muted);flex-basis:100%;order:2"},ind.calc||ind.calcNote));
@@ -802,7 +809,7 @@ function openModal(mes,colKey){
     INDS.forEach(ind=>{
       const t=tgt(mes,u,ind,c);
       body.querySelector('[data-meta="'+ind.id+'"]').textContent="Meta: "+metaText(ind,t);
-      const v=ind.metric(w,c.du,{duMes:duMes(mes),inicio:m.googleInicio??null});
+      const v=ind.metric(w,excecao(mes,ind.okr.id,c).du,{duMes:duMes(mes),inicio:m.googleInicio??null});
       body.querySelector('[data-ind="'+ind.id+'"]').replaceChildren(vSpan(ind,(v==null||!isFinite(v))?null:v,t));
     });
   }
