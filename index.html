@@ -437,6 +437,7 @@ window.PAINEL_CONFIG = {
     </div>
     <button type="button" class="help-btn" id="btn-ajuda"><span aria-hidden="true">?</span>Como preencher</button>
     <label for="mes">Mês</label><select id="mes"></select>
+    <label for="unid">Unidade</label><select id="unid"><option value="">Todas</option></select>
     <div class="who-me" id="userbox" hidden><span class="avatar" id="u-av"></span><span><b id="u-name"></b><br><span id="u-role"></span></span></div>
   </div>
   <nav class="tabs" aria-label="Seções"><div class="wrap" role="tablist">
@@ -545,8 +546,8 @@ const addDays=(d,n)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);
 
 /* ---------- estado ---------- */
 const S={meses:{},metas:{},res:{},fixas:{},feriados:new Set(FERIADOS_PADRAO),units:UNITS_DEFAULT,mes:null,view:"painel",unit:null,
-  open:new Set(),keepScroll:null,uid:null,canWrite:null,owner:false,ready:{meses:false,metas:false,res:false},hist:"pdv",pending:false};
-try{const v=localStorage.getItem("metas.unit");if(v)S.unit=v;const t=localStorage.getItem("metas.view");if(t)S.view=t;const h=localStorage.getItem("metas.hist");if(h)S.hist=h;}catch(e){}
+  open:new Set(),keepScroll:null,filtro:"",uid:null,canWrite:null,owner:false,ready:{meses:false,metas:false,res:false},hist:"pdv",pending:false};
+try{const v=localStorage.getItem("metas.unit");if(v)S.unit=v;const fu=localStorage.getItem("metas.filtro");if(fu)S.filtro=fu;const t=localStorage.getItem("metas.view");if(t)S.view=t;const h=localStorage.getItem("metas.hist");if(h)S.hist=h;}catch(e){}
 let db=null,user=null;
 
 /* ---------- calendário: semana fecha na terça, reunião na quarta ---------- */
@@ -716,14 +717,14 @@ function renderPainel(app){
           body.append(tr);
         });
       };
-      S.units.forEach(u=>rowsFor(u.nome,{
+      S.units.filter(u=>!S.filtro||u.id===S.filtro).forEach(u=>rowsFor(u.nome,{
         tip:m=>labTip(m,[u.id]), uid:u.id,
         past:(m,ind)=>{const a=acumulado(m,u.id,ind);return Object.assign({},a,{t:tgt(m,u.id,ind,a.col)});},
         meta:ind=>targetOf(mes,u.id,ind),
         week:(c,ind)=>Object.assign(cell(mes,u.id,ind,c),{t:tgt(mes,u.id,ind,c)}),
         acc:ind=>{const a=acumulado(mes,u.id,ind);return Object.assign({},a,{t:tgt(mes,u.id,ind,a.col)});}
       },true));
-      if(inds.every(i=>i.agg))rowsFor("Total da rede",{
+      if(!S.filtro&&inds.every(i=>i.agg))rowsFor("Total da rede",{
         tip:m=>labTip(m,S.units.map(x=>x.id)),
         past:(m,ind)=>totalOf(m,ind,u=>acumulado(m,u,ind).col),
         meta:ind=>{if(ind.agg==="ratio"){for(const u of S.units){const t=targetOf(mes,u.id,ind);if(t!=null)return t;}return null;}let s=0,n=0;S.units.forEach(u=>{const t=targetOf(mes,u.id,ind);if(t!=null){s+=t;n++;}});return n?s:null;},
@@ -761,6 +762,7 @@ function ed(td,getters,m,col){
 function openModal(mes,colKey){
   lastFocus=document.activeElement;
   const c=cols(mes).find(x=>x.key===colKey);
+  if(S.filtro&&S.units.find(u=>u.id===S.filtro))S.unit=S.filtro; // unidade filtrada já vem selecionada
   if(!S.unit||!S.units.find(u=>u.id===S.unit))S.unit=S.units[0].id;
   const modal=document.getElementById("modal");
   const msg=h("span",{class:"msg","aria-live":"polite"});
@@ -978,6 +980,9 @@ function render(){
   if(!S.mes||!ids.includes(S.mes))S.mes=ids.includes(thisMonth())?thisMonth():ids[0];
   const sel=document.getElementById("mes");
   sel.replaceChildren(...ids.map(id=>{const o=h("option",{value:id},monthLabel(id));if(id===S.mes)o.selected=true;return o;}));
+  if(S.filtro&&!S.units.find(u=>u.id===S.filtro))S.filtro="";
+  const su=document.getElementById("unid");
+  su.replaceChildren(h("option",{value:""},"Todas"),...S.units.map(u=>{const o=h("option",{value:u.id},u.nome);if(u.id===S.filtro)o.selected=true;return o;}));
   document.getElementById("sub").textContent="Acompanhamento semanal por OKR · "+monthLabel(S.mes)+" · "+duMes(S.mes)+" dias úteis";
   if(S.view==="painel")renderPainel(fresh);else renderCfg(fresh);
   app.replaceWith(fresh);
@@ -1024,6 +1029,7 @@ function openHelp(){
   modal.hidden=false;document.body.classList.add("locked");dlg.querySelector("button").focus();
 }
 document.getElementById("btn-ajuda").addEventListener("click",openHelp);
+document.getElementById("unid").addEventListener("change",e=>{S.filtro=e.target.value;try{localStorage.setItem("metas.filtro",S.filtro);}catch(_){}render();});
 // a janela das semanas muda com o relógio: reavalia a cada 5 minutos
 setInterval(()=>{if(db&&S.view==="painel")render();},300000);
 
