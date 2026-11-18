@@ -132,6 +132,11 @@ table.q tr.sub th.res{background:var(--panel-2)}
 .hp-tips b{color:var(--title)}
 .hp-tips ul{margin:6px 0 0;padding-left:18px;display:grid;gap:4px}
 @media (max-width:640px){.help-btn{padding:6px 10px}}
+table.q .gcol{background:var(--yellow-soft)}
+table.q th.gcol{color:var(--title)}
+.g-nota{font-size:16px;font-weight:700;color:var(--title)}
+.g-star{color:#e0a800;margin-left:3px}
+table.q .g-falta{color:var(--title);font-weight:600}
 table.q td.editavel{cursor:pointer}
 table.q td.editavel:hover{outline:2px solid var(--yellow);outline-offset:-2px}
 table.q .vermeta{display:block;margin:3px auto 0;border:0;background:none;padding:0 2px;font:inherit;font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
@@ -480,8 +485,7 @@ const OKRS=[
    inputs:[{key:"totem",label:"% totem",kind:"pct"}], metric:w=>w.totem??null, target:m=>m}]},
  {id:"qualidade",nome:"Qualidade",split:true,titulo:"Qualidade",desc:"Avaliações no Google, índice de reclamações e cobrança de faltas.",inds:[
   {id:"google",nome:"Avaliações Google",sub:"novas avaliações por dia útil",fmt:"dec1",metaKind:"dec",
-   inputs:[{key:"google",label:"Total de avaliações",kind:"int"},{key:"googleNota",label:"Nota no Google",kind:"dec"}],
-   month:[{key:"googleInicio",label:"Total no início do mês",kind:"int"}],
+   auto:true, inputs:[], month:[], // preenchido toda quarta pela rotina automática (função registrar_google no Supabase)
    metric:(w,du,c)=>w.google!=null&&c.inicio!=null&&du?(w.google-c.inicio)/du:null, target:m=>m,
    raw:(w,c)=>{const p=[];if(w.google!=null&&c.inicio!=null)p.push("+"+fmt(w.google-c.inicio,"int")+" no mês");if(w.googleNota!=null)p.push("nota "+nf(1).format(w.googleNota));return p.length?p.join(" · "):null;}},
   {id:"reclam",nome:"Índice de reclamações",sub:"quanto menor, melhor",fmt:"pct2",metaKind:"pct",lower:true,
@@ -549,7 +553,7 @@ const addDays=(d,n)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);
 
 /* ---------- estado ---------- */
 const S={meses:{},metas:{},res:{},fixas:{},feriados:new Set(FERIADOS_PADRAO),units:UNITS_DEFAULT,mes:null,view:"painel",unit:null,
-  open:new Set(),keepScroll:null,filtro:"",uid:null,canWrite:null,owner:false,ready:{meses:false,metas:false,res:false},hist:"pdv",pending:false};
+  open:new Set(),keepScroll:null,filtro:"",google:{},uid:null,canWrite:null,owner:false,ready:{meses:false,metas:false,res:false},hist:"pdv",pending:false};
 try{const v=localStorage.getItem("metas.unit");if(v)S.unit=v;const fu=localStorage.getItem("metas.filtro");if(fu)S.filtro=fu;const t=localStorage.getItem("metas.view");if(t)S.view=t;const h=localStorage.getItem("metas.hist");if(h)S.hist=h;}catch(e){}
 let db=null,user=null;
 
@@ -606,7 +610,29 @@ function acumulado(mes,u,ind){
   for(let i=cs.length-1;i>=0;i--){const x=cell(mes,u,ind,cs[i]);if(x.v!=null)return Object.assign(x,{col:cs[i]});}
   return {v:null,raw:null};
 }
-function filled(mes,col){return S.units.filter(u=>{const w=(S.res[mes+"_"+u.id]||{})[col.key];return w&&Object.keys(w).some(k=>w[k]!=null);}).length;}
+/* ---------- Google: coleta automática de toda quarta ---------- */
+// coleta mais recente que vale para o mês (ref até o fim do mês)
+function googleSnap(mes,uid){
+  const fim=iso(new Date(+mes.slice(0,4),+mes.slice(5),0));let best=null;
+  for(const id in S.google){const d=S.google[id];if(!d||!d.ref||d.ref>fim)continue;if(uid&&!(d.unidades&&d.unidades[uid]))continue;if(!best||id>best.id)best={id,ref:d.ref,unidades:d.unidades||{}};}
+  if(!best)return null;const [y,m,dd]=best.id.split("-").map(Number);best.captura=new Date(y,m-1,dd);return best;
+}
+// avaliações 5 estrelas necessárias para a nota exibida subir 0,1 (supõe média igual à nota exibida)
+function faltamProxDecimo(nota,total){
+  const alvo=Math.round(nota*10+1)/10;if(alvo>5)return null;
+  const limiar=alvo-0.05,k=total*(limiar-nota)/(5-limiar);return {alvo,k:Math.max(10,Math.round(k/10)*10)};
+}
+function googleTd(mes,uid){
+  const g=googleSnap(mes,uid);const td=h("td",{class:"acc gcol"});
+  if(!g){td.append(h("span",{class:"v na"},"—"));return td;}
+  const [nota,total]=g.unidades[uid];const f=faltamProxDecimo(nota,total);
+  td.append(h("div",{class:"g-nota"},nf(1).format(nota),h("span",{class:"g-star","aria-hidden":"true"},"★")),
+    h("small",{class:"raw"},nf(0).format(total)+" avaliações"),
+    h("small",{class:"raw g-falta"},f?"faltam ~"+nf(0).format(f.k)+" de 5★ p/ "+nf(1).format(f.alvo):"nota máxima"));
+  td.setAttribute("data-tip","Coleta de "+dmw(g.captura)+" (dados até "+g.ref.slice(8,10)+"/"+g.ref.slice(5,7)+")\nAvaliações de 5 estrelas necessárias para a nota exibida subir para "+(f?nf(1).format(f.alvo):"5,0")+". Valor aproximado.");
+  td.classList.add("has-tip");return td;
+}
+function filled(mes,col){return S.units.filter(u=>{const w=(S.res[mes+"_"+u.id]||{})[col.key];return w&&Object.keys(w).some(k=>w[k]!=null&&k!=="google"&&k!=="googleNota");}).length;}
 const canInsert=()=>!!db&&S.canWrite!==false;
 
 /* ---------- DOM ---------- */
@@ -710,7 +736,8 @@ function renderPainel(app){
       });
       hr.append(h("th",{class:"cur-start"},"Meta"));
       weekCols.forEach(c=>{const x=excecao(mes,inds[0].okr.id,c);hr.append(h("th",{},c.label,h("small",{},x.sub+" · "+x.du+" DU")));});
-      hr.append(h("th",{class:"acc"},"Acumulado",h("small",{},"mês")));
+      if(inds[0].id==="google"){const g=googleSnap(mes,null);hr.append(h("th",{class:"acc gcol"},"Google",h("small",{},g?"coleta "+dmw(g.captura):"sem coleta")));}
+      else hr.append(h("th",{class:"acc"},"Acumulado",h("small",{},"mês")));
       const body=h("tbody");
       const rowsFor=(label,getters,first,cls)=>{
         inds.forEach((ind,k)=>{
@@ -721,6 +748,7 @@ function renderPainel(app){
           const mt=getters.meta(ind);
           tr.append(metaTd("metac cur-start",mt==null?"—":fmt(mt,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(mes):null));
           weekCols.forEach(c=>{const r=getters.week(c,ind);const td=ed(resCell(ind,r,r.t),getters,mes,c.key);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
+          if(ind.id==="google"&&getters.uid){const r=getters.acc(ind);if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}tr.append(googleTd(mes,getters.uid));body.append(tr);return;}
           const r=getters.acc(ind);const td=ed(resCell(ind,r,r.t,"acc"),getters,mes,"fech");if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);
           if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}
           body.append(tr);
@@ -1024,7 +1052,7 @@ function openHelp(){
           h("div",{class:"hp-grp"},"Digitalização"),
           campos([["Consultório","% digitalizado (ex.: 88,5)"],["Totem","% de uso do totem (ex.: 72)"]]),
           h("div",{class:"hp-grp"},"Qualidade"),
-          campos([["Avaliações Google","Total de avaliações que aparece hoje no Google e a nota"],["Índice de reclamações","% de reclamações (ex.: 0,35)"]].concat(INDS.some(i=>i.id==="faltas")?[["Cobrança de faltas","Faltas no período e quantas foram cobradas"]]:[]))),
+          campos([["Avaliações Google","Nada: a nota e o total de avaliações são trazidos automaticamente toda quarta"],["Índice de reclamações","% de reclamações (ex.: 0,35)"]].concat(INDS.some(i=>i.id==="faltas")?[["Cobrança de faltas","Faltas no período e quantas foram cobradas"]]:[]))),
         passo(5,"Confira e salve",p("Ao lado de cada campo aparece o resultado calculado: verde está na meta, vermelho está fora. Confira e clique em Salvar dados.")),
         passo(6,"Errou algum número?",p("Enquanto a semana estiver aberta, clique de novo em Inserir dados, escolha a unidade, corrija e salve. Depois que a semana fechar, peça a correção ao administrador."))),
       h("div",{class:"hp-tips"},h("b",{},"Dicas"),
@@ -1068,6 +1096,7 @@ setInterval(()=>{if(db&&S.view==="painel")render();},300000);
   sub("meses","meses",o=>{S.meses=o;});
   sub("metas","metas",o=>{S.metas=o;});
   sub("resultados","res",o=>{S.res=o;});
+  db.collection("google").onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{o[d.id]=d.data();});S.google=o;render();},()=>{});
   db.doc("config/geral").onSnapshot(s=>{const d=s.exists?s.data():null;if(d&&Array.isArray(d.unidades)&&d.unidades.length){S.units=d.unidades;render();}},()=>{});
   db.doc("config/metasFixas").onSnapshot(s=>{S.fixas=s.exists?(s.data()||{}):{};render();},()=>{});
   db.doc("config/feriados").onSnapshot(s=>{const d=s.exists?s.data():null;if(d&&Array.isArray(d.datas))S.feriados=new Set(d.datas);render();},()=>{});
