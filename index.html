@@ -636,12 +636,12 @@ function googleTd(mes,uid){
   td.setAttribute("data-tip","Coleta de "+dmw(g.captura)+" (dados até "+g.ref.slice(8,10)+"/"+g.ref.slice(5,7)+")\nAvaliações de 5 estrelas necessárias para a nota exibida subir para "+(f?nf(1).format(f.alvo):"5,0")+". Valor aproximado.");
   td.classList.add("has-tip");return td;
 }
-// semana do calendário em que estamos hoje (de quarta a terça); só no mês corrente
+// semana da última reunião já ocorrida (reunião = quarta seguinte à terça de corte)
 function semanaAtual(c){
   if(!c||c.key==="fech")return false;
-  const hoje=new Date(),fim=new Date(c.ate.getFullYear(),c.ate.getMonth(),c.ate.getDate(),23,59,59);
-  const ini=c.n===1?new Date(c.ate.getFullYear(),c.ate.getMonth(),1):addDays(c.ate,-6);
-  return hoje>=ini&&hoje<=fim;
+  const hoje=new Date(),mes=c.ate.getFullYear()+"-"+pad(c.ate.getMonth()+1);
+  const feitas=cols(mes).filter(x=>x.key!=="fech"&&x.abre<=hoje);
+  return feitas.length>0&&feitas[feitas.length-1].key===c.key;
 }
 function filled(mes,col){return S.units.filter(u=>{const w=(S.res[mes+"_"+u.id]||{})[col.key];return w&&Object.keys(w).some(k=>w[k]!=null&&k!=="google"&&k!=="googleNota");}).length;}
 const canInsert=()=>!!db&&S.canWrite!==false;
