@@ -137,6 +137,10 @@ table.q th.gcol{color:var(--title)}
 .g-nota{font-size:16px;font-weight:700;color:var(--title)}
 .g-star{color:#e0a800;margin-left:3px}
 table.q .g-falta{color:var(--title);font-weight:600}
+table.q th.curwk,table.q td.curwk{background:var(--yellow)}
+table.q tr.total td.curwk{background:var(--yellow)}
+table.q tr.sub th.curwk{color:var(--on-yellow)}
+table.q td.curwk .raw{color:var(--on-yellow)}
 table.q td.editavel{cursor:pointer}
 table.q td.editavel:hover{outline:2px solid var(--yellow);outline-offset:-2px}
 table.q .vermeta{display:block;margin:3px auto 0;border:0;background:none;padding:0 2px;font:inherit;font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
@@ -632,6 +636,13 @@ function googleTd(mes,uid){
   td.setAttribute("data-tip","Coleta de "+dmw(g.captura)+" (dados até "+g.ref.slice(8,10)+"/"+g.ref.slice(5,7)+")\nAvaliações de 5 estrelas necessárias para a nota exibida subir para "+(f?nf(1).format(f.alvo):"5,0")+". Valor aproximado.");
   td.classList.add("has-tip");return td;
 }
+// semana do calendário em que estamos hoje (de quarta a terça); só no mês corrente
+function semanaAtual(c){
+  if(!c||c.key==="fech")return false;
+  const hoje=new Date(),fim=new Date(c.ate.getFullYear(),c.ate.getMonth(),c.ate.getDate(),23,59,59);
+  const ini=c.n===1?new Date(c.ate.getFullYear(),c.ate.getMonth(),1):addDays(c.ate,-6);
+  return hoje>=ini&&hoje<=fim;
+}
 function filled(mes,col){return S.units.filter(u=>{const w=(S.res[mes+"_"+u.id]||{})[col.key];return w&&Object.keys(w).some(k=>w[k]!=null&&k!=="google"&&k!=="googleNota");}).length;}
 const canInsert=()=>!!db&&S.canWrite!==false;
 
@@ -727,7 +738,8 @@ function renderPainel(app){
       const isOpen=m=>S.open.has(qk+"|"+m);
       const toggle=m=>{const k=qk+"|"+m;S.keepScroll=[...document.querySelectorAll("#app .scroll")].map(e=>e.scrollLeft);if(S.open.has(k))S.open.delete(k);else S.open.add(k);render();};
       past.forEach(m=>g.append(h("th",{colspan:isOpen(m)?2:1,class:"mstart"},monthLabel(m))));
-      g.append(h("th",{class:"cur cur-start",colspan:weekCols.length+2},monthLabel(mes)+" · semanas"));
+      const temG=inds[0].id==="google";
+      g.append(h("th",{class:"cur cur-start",colspan:weekCols.length+1+(temG?1:0)},monthLabel(mes)+" · semanas"));
       const hr=h("tr",{class:"sub"});
       past.forEach(m=>{
         const b=h("button",{class:"vermeta",type:"button","aria-expanded":String(isOpen(m)),onclick:()=>toggle(m)},isOpen(m)?"ocultar meta":"ver meta");
@@ -735,9 +747,9 @@ function renderPainel(app){
         hr.append(h("th",{class:"res"+(isOpen(m)?"":" mstart")},"Resultado",b));
       });
       hr.append(h("th",{class:"cur-start"},"Meta"));
-      weekCols.forEach(c=>{const x=excecao(mes,inds[0].okr.id,c);hr.append(h("th",{},c.label,h("small",{},x.sub+" · "+x.du+" DU")));});
+      weekCols.forEach(c=>{const x=excecao(mes,inds[0].okr.id,c);hr.append(h("th",{class:semanaAtual(c)?"curwk":null},c.label,h("small",{},x.sub+" · "+x.du+" DU")));});
       if(inds[0].id==="google"){const g=googleSnap(mes,null);hr.append(h("th",{class:"acc gcol"},"Google",h("small",{},g?"coleta "+dmw(g.captura):"sem coleta")));}
-      else hr.append(h("th",{class:"acc"},"Acumulado",h("small",{},"mês")));
+      // coluna "Acumulado mês" removida (o status do OKR continua usando o último lançamento)
       const body=h("tbody");
       const rowsFor=(label,getters,first,cls)=>{
         inds.forEach((ind,k)=>{
@@ -747,9 +759,9 @@ function renderPainel(app){
           past.forEach(m=>{const r=getters.past(m,ind);if(isOpen(m))tr.append(metaTd("metac mstart",r.t==null?"—":fmt(r.t,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(m):null));tr.append(ed(resCell(ind,r,r.t,"res"+(isOpen(m)?"":" mstart")),getters,m,"fech"));});
           const mt=getters.meta(ind);
           tr.append(metaTd("metac cur-start",mt==null?"—":fmt(mt,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(mes):null));
-          weekCols.forEach(c=>{const r=getters.week(c,ind);const td=ed(resCell(ind,r,r.t),getters,mes,c.key);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
+          weekCols.forEach(c=>{const r=getters.week(c,ind);const td=ed(resCell(ind,r,r.t,semanaAtual(c)?"curwk":null),getters,mes,c.key);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
           if(ind.id==="google"&&getters.uid){const r=getters.acc(ind);if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}tr.append(googleTd(mes,getters.uid));body.append(tr);return;}
-          const r=getters.acc(ind);const td=ed(resCell(ind,r,r.t,"acc"),getters,mes,"fech");if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);
+          const r=getters.acc(ind);
           if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}
           body.append(tr);
         });
