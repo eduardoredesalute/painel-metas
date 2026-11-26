@@ -141,6 +141,11 @@ table.q th.curwk,table.q td.curwk{background:var(--yellow)}
 table.q tr.total td.curwk{background:var(--yellow)}
 table.q tr.sub th.curwk{color:var(--on-yellow)}
 table.q td.curwk .raw{color:var(--on-yellow)}
+table.q .conv{display:block;width:fit-content;margin:3px auto 0;font-size:12px;padding:1px 6px;border-radius:4px;color:var(--muted)}
+table.q .conv.ok{background:var(--ok-bg);color:var(--ok);font-weight:600}
+table.q .conv.bad{background:var(--bad-bg);color:var(--bad);font-weight:600}
+table.q .k-sub{display:block;font-size:13px;font-weight:600;color:var(--ink);margin-top:2px;padding-left:12px}
+table.q .m-conv{display:block;margin-top:4px;font-weight:inherit;color:inherit}
 table.q td.editavel{cursor:pointer}
 table.q td.editavel:hover{outline:2px solid var(--yellow);outline-offset:-2px}
 table.q .vermeta{display:block;margin:3px auto 0;border:0;background:none;padding:0 2px;font:inherit;font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
@@ -473,13 +478,14 @@ const OKRS=[
    inputs:[{key:"passes",label:"Quantidade de passes",kind:"int"}], calcNote:"O % é calculado pelo painel: passes ÷ Total PDV.",
    metric:w=>w.passes!=null&&w.pdv?w.passes/w.pdv:null, target:m=>m,
    raw:w=>w.passes!=null?fmt(w.passes,"int")+" passes":null}]},
- {id:"exames",nome:"Exames",titulo:"Exames",desc:"Faturamento de exames em R$ por dia útil.",inds:[
-  {id:"labus",nome:"Lab + US",agg:"sum",sub:"R$ por dia útil",fmt:"brl",metaKind:"dec",
-   inputs:[{key:"lab",label:"Laboratório (R$ por DU)",kind:"dec"},{key:"us",label:"US (R$ por DU)",kind:"dec"}],
-   calcNote:"Lab + US é a soma dos dois, calculada pelo painel.",
-   // lançamentos novos têm lab e us separados; os antigos só o total (labus)
-   metric:w=>(w.lab!=null||w.us!=null)?(w.lab||0)+(w.us||0):(w.labus??null), target:m=>m,
-   tip:w=>(w.lab!=null||w.us!=null)?"Laboratório: R$ "+nf(0).format(w.lab||0)+"\nUS: R$ "+nf(0).format(w.us||0):null},
+ {id:"exames",nome:"Exames",titulo:"Exames",desc:"Faturamento de exames em R$ por dia útil e conversão de Laboratório e US.",inds:[
+  // Laboratório e US em linhas separadas, cada um com a sua conversão (%). Os meses antigos só têm o total (labus).
+  {id:"lab",nome:"Laboratório",short:"Laboratório",agg:"sum",sub:"R$ por dia útil · conversão",fmt:"brl",metaKind:"dec",
+   inputs:[{key:"lab",label:"Laboratório (R$ por DU)",kind:"dec"},{key:"labConv",label:"Conversão Laboratório",kind:"pct"}],
+   metric:w=>w.lab??null, target:m=>m, conv:"labConv"},
+  {id:"us",nome:"US",short:"US",agg:"sum",sub:"R$ por dia útil · conversão",fmt:"brl",metaKind:"dec",
+   inputs:[{key:"us",label:"US (R$ por DU)",kind:"dec"},{key:"usConv",label:"Conversão US",kind:"pct"}],
+   metric:w=>w.us??null, target:m=>m, conv:"usConv"},
   {id:"todos",nome:"Todos os exames",agg:"sum",sub:"R$ por dia útil",fmt:"brl",metaKind:"dec",
    inputs:[{key:"todos",label:"R$ por DU",kind:"dec"}], metric:w=>w.todos??null, target:m=>m}]},
  {id:"digital",nome:"Digitalização",split:true,titulo:"Digitalização",desc:"Atendimento digitalizado no consultório e uso do totem.",inds:[
@@ -500,7 +506,7 @@ const OKRS=[
    metric:w=>w.faltas?(w.cobradas??0)/w.faltas:null, target:m=>m,
    raw:w=>w.faltas?fmt(w.cobradas??0,"int")+" de "+fmt(w.faltas,"int"):null}]}
 ];
-const MENSAIS=["pdv","passes","labus","todos"];          // meta muda a cada mês
+const MENSAIS=["pdv","passes","lab","labConv","us","usConv","todos"];          // meta muda a cada mês
 const FIXAS=["consultorio","totem","google","reclam","faltas"]; // meta fixa por unidade
 // indicadores marcados como oculto ficam guardados no código e no banco, mas não aparecem no painel
 OKRS.forEach(o=>{o.inds=o.inds.filter(i=>!i.oculto);});
@@ -606,7 +612,8 @@ function cell(mes,u,ind,col){
   col=excecao(mes,ind.okr.id,col);
   const r=S.res[mes+"_"+u]||{}, w=r[col.key]||{}, c=ctx(mes,u);
   const v=ind.metric(w,col.du,c);
-  return {v:(v==null||!isFinite(v))?null:v, raw:ind.raw?ind.raw(w,c):null, tip:ind.tip?ind.tip(w):null};
+  const conv=ind.conv?{v:w[ind.conv]??null,t:(S.metas[mes+"_"+u]||{})[ind.conv]??null}:null;
+  return {v:(v==null||!isFinite(v))?null:v, raw:ind.raw?ind.raw(w,c):null, tip:ind.tip?ind.tip(w):null, conv};
 }
 function status(ind,v,t){if(v==null||t==null)return "na";return (ind.lower?v<=t+1e-12:v>=t-1e-12)?"ok":"bad";}
 function acumulado(mes,u,ind){
@@ -662,6 +669,8 @@ function vSpan(ind,v,t){
 }
 // balão com a meta aberta em Laboratório e US (quando a meta foi lançada separada)
 function labTip(mes,uids){let l=0,us=0,n=0;uids.forEach(u=>{const m=S.metas[mes+"_"+u];if(m&&(m.lab!=null||m.us!=null)){l+=m.lab||0;us+=m.us||0;n++;}});return n?"Laboratório: R$ "+nf(0).format(l)+"\nUS: R$ "+nf(0).format(us):null;}
+// meta de conversão embaixo da meta em R$ (Laboratório e US)
+function convMeta(td,ind,m,getters){if(ind.conv&&getters.uid){const t=(S.metas[m+"_"+getters.uid]||{})[ind.conv];td.append(h("span",{class:"m-conv"},t==null?"—":fmt(t,"pct1").replace(",0%","%")));}return td;}
 function metaTd(cls,txt,tip){const td=h("td",{class:cls},txt);if(tip){td.classList.add("has-tip");td.setAttribute("data-tip",tip);td.setAttribute("tabindex","0");td.setAttribute("aria-label",txt+". "+tip.replace("\n",", "));}return td;}
 (function(){
   const tip=document.createElement("div");tip.className="tipbox";tip.setAttribute("role","tooltip");tip.hidden=true;document.body.append(tip);
@@ -710,6 +719,7 @@ function resCell(ind,x,t,cls){
   if(ind.id==="passes"&&x.raw){td.append(h("span",{class:"v top "+status(ind,x.v,t)},x.raw.replace(" passes","")));td.append(vSpan(ind,x.v,t));}
   else{td.append(vSpan(ind,x.v,t));if(x.raw)td.append(h("small",{class:"raw"},x.raw));}
   if(x.tip){td.setAttribute("data-tip",x.tip);td.classList.add("has-tip");}
+  if(x.conv&&x.conv.v!=null){const st=status({},x.conv.v,x.conv.t);const c=h("span",{class:"conv "+st},"conv. "+fmt(x.conv.v,"pct1"));if(x.conv.t!=null)c.title="Meta de conversão: "+fmt(x.conv.t,"pct1");td.append(c);}
   return td;
 }
 // soma da rede: "sum" soma valores e metas; "ratio" (passes) = Σpasses / Σvendas
@@ -755,10 +765,10 @@ function renderPainel(app){
         inds.forEach((ind,k)=>{
           const tr=h("tr",{class:(k===0?"ufirst ":"")+(cls||"")});
           if(k===0)tr.append(h("td",{class:"c-u",rowspan:inds.length},label));
-          if(!one)tr.append(h("td",{class:"c-k"},ind.short||ind.nome));
-          past.forEach(m=>{const r=getters.past(m,ind);if(isOpen(m))tr.append(metaTd("metac mstart",r.t==null?"—":fmt(r.t,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(m):null));tr.append(ed(resCell(ind,r,r.t,"res"+(isOpen(m)?"":" mstart")),getters,m,"fech"));});
+          if(!one)tr.append(h("td",{class:"c-k"},ind.short||ind.nome,ind.conv?h("span",{class:"k-sub"},"conversão"):null));
+          past.forEach(m=>{const r=getters.past(m,ind);if(isOpen(m))tr.append(convMeta(metaTd("metac mstart",r.t==null?"—":fmt(r.t,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(m):null),ind,m,getters));tr.append(ed(resCell(ind,r,r.t,"res"+(isOpen(m)?"":" mstart")),getters,m,"fech"));});
           const mt=getters.meta(ind);
-          tr.append(metaTd("metac cur-start",mt==null?"—":fmt(mt,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(mes):null));
+          tr.append(convMeta(metaTd("metac cur-start",mt==null?"—":fmt(mt,ind.fmt),ind.id==="labus"&&getters.tip?getters.tip(mes):null),ind,mes,getters));
           weekCols.forEach(c=>{const r=getters.week(c,ind);const td=ed(resCell(ind,r,r.t,semanaAtual(c)?"curwk":null),getters,mes,c.key);if(ind.prorate&&r.t!=null)td.append(h("small",{class:"raw"},"meta "+fmt(r.t,"int")));tr.append(td);});
           if(ind.id==="google"&&getters.uid){const r=getters.acc(ind);if(first){const st=status(ind,r.v,r.t);if(st!=="na"){otot++;if(st==="ok")ook++;}}tr.append(googleTd(mes,getters.uid));body.append(tr);return;}
           const r=getters.acc(ind);
@@ -848,7 +858,7 @@ function openModal(mes,colKey){
     const {w,m}=read(), u=S.unit;
     INDS.forEach(ind=>{
       const t=tgt(mes,u,ind,c);
-      body.querySelector('[data-meta="'+ind.id+'"]').textContent="Meta: "+metaText(ind,t);
+      {const ct=ind.conv?(S.metas[mes+"_"+u]||{})[ind.conv]:null;body.querySelector('[data-meta="'+ind.id+'"]').textContent="Meta: "+metaText(ind,t)+(ct!=null?" · conversão "+fmt(ct,"pct1"):"");}
       const v=ind.metric(w,excecao(mes,ind.okr.id,c).du,{duMes:duMes(mes),inicio:m.googleInicio??null});
       body.querySelector('[data-ind="'+ind.id+'"]').replaceChildren(vSpan(ind,(v==null||!isFinite(v))?null:v,t));
     });
@@ -935,12 +945,12 @@ async function saveFixa(u,k,v){
   S.fixas[u]=Object.assign({},S.fixas[u]||{},{[k]:v});
 }
 function kindOf(i){return i.metaKind==="int"?"int":i.metaKind==="pct"?"pct":"dec";}
-function hint(i){return {pdv:"vendas no mês",passes:"%",labus:"R$ por DU",todos:"R$ por DU",consultorio:"%",totem:"%",google:"por DU",reclam:"% máximo",faltas:"%"}[i.id];}
+function hint(i){return {pdv:"vendas no mês",passes:"%",lab:"R$ por DU",us:"R$ por DU",labus:"R$ por DU",todos:"R$ por DU",consultorio:"%",totem:"%",google:"por DU",reclam:"% máximo",faltas:"%"}[i.id];}
 function renderCfg(app){
   const mes=S.mes, prevM=shiftMonth(mes,-1);
   // metas do mês
   const mi=INDS.filter(i=>!i.fixa&&!i.metaKey);
-  const hr=h("tr",{},h("th",{},"Unidade"));mi.forEach(i=>{if(i.id==="labus")hr.append(h("th",{},"Laboratório",h("small",{},"R$ por DU")),h("th",{},"US",h("small",{},"R$ por DU")),h("th",{},"Lab + US",h("small",{},"soma")));else hr.append(h("th",{},i.nome,h("small",{},hint(i))));});
+  const hr=h("tr",{},h("th",{},"Unidade"));mi.forEach(i=>{if(i.conv){hr.append(h("th",{},i.nome,h("small",{},hint(i))),h("th",{},"Conversão "+i.nome,h("small",{},"%")));return;}if(i.id==="labus")hr.append(h("th",{},"Laboratório",h("small",{},"R$ por DU")),h("th",{},"US",h("small",{},"R$ por DU")),h("th",{},"Lab + US",h("small",{},"soma")));else hr.append(h("th",{},i.id==="pdv"?"Total PDV":i.nome,h("small",{},hint(i))));});
   const tb=h("tbody");
   S.units.forEach(u=>{const tr=h("tr",{},h("td",{class:"u"},u.nome));
     mi.forEach(i=>{
@@ -950,7 +960,8 @@ function renderCfg(app){
         const part=k=>h("td",{},metaInput("mm-"+u.id+"-"+k,cur()[k],"dec",(k==="lab"?"Meta Laboratório":"Meta US")+" · "+u.nome,async v=>{
           await saveMetaMes(mes,u.id,k,v);const c=cur();const t=(c.lab||0)+(c.us||0);await saveMetaMes(mes,u.id,"labus",t);sum.textContent=fmt(t,"brl");}));
         tr.append(part("lab"),part("us"),sum);return;}
-      tr.append(h("td",{},metaInput("mm-"+u.id+"-"+i.id,S.metas[mes+"_"+u.id]?.[i.id],kindOf(i),"Meta "+i.nome+" · "+u.nome,v=>saveMetaMes(mes,u.id,i.id,v))));});
+      tr.append(h("td",{},metaInput("mm-"+u.id+"-"+i.id,S.metas[mes+"_"+u.id]?.[i.id],kindOf(i),"Meta "+i.nome+" · "+u.nome,v=>saveMetaMes(mes,u.id,i.id,v))));
+      if(i.conv)tr.append(h("td",{},metaInput("mm-"+u.id+"-"+i.conv,S.metas[mes+"_"+u.id]?.[i.conv],"pct","Meta conversão "+i.nome+" · "+u.nome,v=>saveMetaMes(mes,u.id,i.conv,v))));});
     tb.append(tr);});
   const copyBox=h("span",{class:"row"});
   const hasPrev=S.units.some(u=>MENSAIS.some(k=>S.metas[prevM+"_"+u.id]?.[k]!=null));
@@ -1060,7 +1071,7 @@ function openHelp(){
           h("div",{class:"hp-grp"},"Comercial"),
           campos([["Total PDV","Quantidade de vendas PDV no mês"],["% Passes","Quantidade de passes no mês"],["Vendas x DU","Nada: o painel calcula"]]),
           h("div",{class:"hp-grp"},"Exames"),
-          campos([["Lab + US","Laboratório e US, separados, em R$ por dia útil. O painel soma"],["Todos os exames","Total em R$ por dia útil"]]),
+          campos([["Laboratório","R$ por dia útil e a conversão (%)"],["US","R$ por dia útil e a conversão (%)"],["Todos os exames","Total em R$ por dia útil"]]),
           h("div",{class:"hp-grp"},"Digitalização"),
           campos([["Consultório","% digitalizado (ex.: 88,5)"],["Totem","% de uso do totem (ex.: 72)"]]),
           h("div",{class:"hp-grp"},"Qualidade"),
@@ -1072,7 +1083,7 @@ function openHelp(){
           h("li",{},"Digite só números, sem R$ e sem %. Use vírgula para decimais: 88,5."),
           h("li",{},"Deixe em branco o que não tiver. Campo vazio não conta como zero."),
           h("li",{},"Fechamento do mês: do dia 1º ao dia 7 do mês seguinte, lance os números do mês inteiro."),
-          h("li",{},"Passe o mouse sobre a meta de Lab + US para ver Laboratório e US separados.")))),
+          h("li",{},"Conversão: digite o percentual, por exemplo 62,5.")))),
     h("div",{class:"dlg-f"},h("button",{class:"btn yellow",type:"button",onclick:closeModal},"Entendi")));
   dlg.addEventListener("keydown",e=>{if(e.key==="Escape"){e.preventDefault();closeModal();}});
   modal.replaceChildren(dlg);modal.onclick=e=>{if(e.target===modal)closeModal();};
